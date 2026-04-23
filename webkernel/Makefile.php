@@ -327,22 +327,17 @@ function arrayToPhpLiteral(array $data, int $indent = 4): string
 }
 function stamp(string $version, int $build, string $codename, string $channel): void
 {
-    // git calls happen BEFORE stamping so commit hash reflects the state before this release
-    $commitShort = gitCommitShort();
-    $commitFull  = gitCommitFull();
-    $branch      = gitBranch();
-    $tag         = gitTag() ?: "v{$version}";
-    $requires    = buildRequires();
-    $compat      = buildCompatibleWith();
-    $scalars = [
+    $branch   = gitBranch();
+    $tag      = "v{$version}";
+    $requires = buildRequires();
+    $compat   = buildCompatibleWith();
+    $scalars  = [
         'WEBKERNEL_VERSION'     => "'{$version}'",
         'WEBKERNEL_BUILD'       => (string) $build,
         'WEBKERNEL_SEMVER'      => "'" . $version . '+' . $build . "'",
         'WEBKERNEL_CODENAME'    => "'{$codename}'",
         'WEBKERNEL_CHANNEL'     => "'{$channel}'",
         'WEBKERNEL_RELEASED_AT' => "'" . date('Y-m-d') . "'",
-        'WEBKERNEL_COMMIT'      => "'{$commitShort}'",
-        'WEBKERNEL_COMMIT_FULL' => "'{$commitFull}'",
         'WEBKERNEL_BRANCH'      => "'{$branch}'",
         'WEBKERNEL_TAG'         => "'{$tag}'",
     ];
@@ -368,14 +363,6 @@ function stamp(string $version, int $build, string $codename, string $channel): 
         file_put_contents(BOOT, $content);
         file_put_contents(BUILD_FILE, (string) $build);
     }, 'Stamping fast-boot.php…');
-}
-function stampCommitHash(string $short, string $full): void
-{
-    $content = file_get_contents(BOOT);
-    foreach (['WEBKERNEL_COMMIT' => "'{$short}'", 'WEBKERNEL_COMMIT_FULL' => "'{$full}'"] as $c => $v) {
-        $content = preg_replace("/(?<=define\('{$c}',\s{0,10})[^)]+(?=\))/", $v, $content);
-    }
-    file_put_contents(BOOT, $content);
 }
 // ── Git commit + push whole bootstrap/ ───────────────────────────────────────
 function gitCommitAndTag(string $semver, string $codename): string
@@ -403,33 +390,32 @@ function gitCommitAndTag(string $semver, string $codename): string
     spin(function () use ($commitMsg, &$committed): void {
         $runner = gitRunner();
         $runner->add('.');
-        $signed  = $runner->hasSigning();
-        $commit  = $signed ? $runner->commitSigned($commitMsg) : $runner->commit($commitMsg);
+        $signed = $runner->hasSigning();
+        $commit = $signed ? $runner->commitSigned($commitMsg) : $runner->commit($commitMsg);
         if ($commit->ok) { $committed = true; }
     }, 'Committing bootstrap/…');
     if (!$committed) {
         warning('Git commit failed — nothing to commit or an error occurred.');
         return '';
     }
-    // Patch the commit hash into fast-boot.php and amend — no new commit, tag lands on this one
-    $short = gitCommitShort();
-    $full  = gitCommitFull();
-    spin(function () use ($short, $full): void {
-        stampCommitHash($short, $full);
-        $runner = gitRunner();
-        $runner->add(BOOT);
-        $signed = $runner->hasSigning();
-        $signed ? $runner->amendNoEditSigned() : $runner->amendNoEdit();
-    }, 'Patching commit hash into fast-boot.php…');
     $commitHash = gitCommitShort();
     info("Committed {$commitHash}");
     $tagged = false;
     if (confirm("Tag this commit as {$semver}?", default: true)) {
+        $notes   = text(label: 'Release notes (changelog)', placeholder: 'Bug fixes, improvements…', default: '');
+        $videoId = text(label: 'YouTube video ID (optional)', placeholder: 'dQw4w9WgXcQ', default: '');
+        $tagMeta = json_encode(array_filter([
+            'codename' => $codename,
+            'channel'  => $channel,
+            'notes'    => $notes ?: null,
+            'video'    => $videoId ?: null,
+        ]), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $tagMsg  = "{$semver}\n\n{$tagMeta}";
         $tagResult = null;
-        spin(function () use ($semver, &$tagResult): void {
+        spin(function () use ($semver, $tagMsg, &$tagResult): void {
             $runner    = gitRunner();
             $signed    = $runner->hasSigning();
-            $tagResult = $signed ? $runner->tagSigned($semver) : $runner->tag($semver);
+            $tagResult = $signed ? $runner->tagSigned($semver, $tagMsg) : $runner->tag($semver, $tagMsg);
         }, "Tagging {$semver}…");
         if ($tagResult?->ok) {
             $tagged = true;
@@ -437,7 +423,7 @@ function gitCommitAndTag(string $semver, string $codename): string
         } else {
             $err = trim($tagResult?->stderr ?? '');
             warning("Tagging failed: " . ($err ?: 'unknown git error'));
-            note("  cd bootstrap && git tag " . (hasSigningConfig() ? '-s ' : '') . $semver);
+            note("  cd bootstrap && git tag " . (hasSigningConfig() ? '-s ' : '-a ') . "-m '{$tagMsg}' {$semver}");
         }
     }
     if (!confirm('Push to origin (' . REQUIRED_REMOTE . ')?', default: true)) {

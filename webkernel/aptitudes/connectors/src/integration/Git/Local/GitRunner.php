@@ -76,7 +76,7 @@ final class GitRunner
     public function add(string $pathspec = '.'): GitResult               { return $this->run(['add', $pathspec]); }
     public function commit(string $message): GitResult                   { return $this->run(['commit', '-m', $message]); }
     public function commitSigned(string $message): GitResult             { return $this->run(['commit', '-S', '-m', $message]); }
-    public function tag(string $name): GitResult                         { return $this->run(['tag', $name]); }
+    public function tag(string $name, string $message = ''): GitResult   { return $this->run($message !== '' ? ['tag', '-a', '-m', $message, $name] : ['tag', $name]); }
     public function tagSigned(string $name, string $message = ''): GitResult { return $this->run(['tag', '-s', '-m', $message ?: $name, $name]); }
     public function push(string $remote, string $ref): GitResult         { return $this->run(['push', $remote, $ref]); }
     public function signingFormat(): GitResult                           { return $this->run(['config', '--get', 'gpg.format']); }
