@@ -105,6 +105,10 @@ final class GitRunner
         return $r->ok ? $r->stdout : '';
     }
 
+    public function configGlobal(string $key, string $value): GitResult  { return $this->run(['config', '--global', $key, $value]); }
+    public function amendNoEdit(): GitResult                             { return $this->run(['commit', '--amend', '--no-edit']); }
+    public function amendNoEditSigned(): GitResult                      { return $this->run(['commit', '--amend', '-S', '--no-edit']); }
+
     public function hasSigning(): bool
     {
         $fmt = $this->signingFormat();

@@ -39,6 +39,23 @@ function gitCommitFull(): string  { return gitRunner()->revParseFull()->value();
 function gitBranch(): string      { return gitRunner()->currentBranch(); }
 function gitTag(): string         { return gitRunner()->currentTag(); }
 function hasSigningConfig(): bool { return gitRunner()->hasSigning(); }
+function detectSshKeys(): array
+{
+    $home   = $_SERVER['HOME'] ?? (function_exists('posix_getuid') ? (posix_getpwuid(posix_getuid())['dir'] ?? '') : '');
+    $sshDir = rtrim($home, '/') . '/.ssh';
+    $found  = [];
+    foreach (['id_ed25519.pub', 'id_ecdsa.pub', 'id_rsa.pub'] as $file) {
+        $path = $sshDir . '/' . $file;
+        if (is_readable($path)) { $found[] = $path; }
+    }
+    return $found;
+}
+function autoSetupSigning(string $keyPath): bool
+{
+    $runner = gitRunner();
+    return $runner->configGlobal('gpg.format', 'ssh')->ok
+        && $runner->configGlobal('user.signingkey', $keyPath)->ok;
+}
 // ── Argument parsing ──────────────────────────────────────────────────────────
 function parseArgs(array $argv): array
 {
@@ -352,12 +369,20 @@ function stamp(string $version, int $build, string $codename, string $channel): 
         file_put_contents(BUILD_FILE, (string) $build);
     }, 'Stamping fast-boot.php…');
 }
-// ── Git commit + push whole bootstrap/ ───────────────────────────────────────
-function gitCommitAndTag(string $semver, string $codename): void
+function stampCommitHash(string $short, string $full): void
 {
-    if (!confirm("Commit all changes in bootstrap/ and tag {$semver}?", default: true)) {
+    $content = file_get_contents(BOOT);
+    foreach (['WEBKERNEL_COMMIT' => "'{$short}'", 'WEBKERNEL_COMMIT_FULL' => "'{$full}'"] as $c => $v) {
+        $content = preg_replace("/(?<=define\('{$c}',\s{0,10})[^)]+(?=\))/", $v, $content);
+    }
+    file_put_contents(BOOT, $content);
+}
+// ── Git commit + push whole bootstrap/ ───────────────────────────────────────
+function gitCommitAndTag(string $semver, string $codename): string
+{
+    if (!confirm('Commit all changes in bootstrap/?', default: true)) {
         warning('Skipped git commit. Remember to commit manually.');
-        $signFlags = hasSigningConfig() ? '-S' : '';
+        $signFlags    = hasSigningConfig() ? '-S' : '';
         $tagSignFlags = hasSigningConfig() ? '-s' : '';
         note(implode("\n", [
             '  cd bootstrap',
@@ -367,7 +392,7 @@ function gitCommitAndTag(string $semver, string $codename): void
             '  git push origin HEAD',
             "  git push origin {$semver}",
         ]));
-        return;
+        return '';
     }
     $commitMsg = text(
         label: 'Commit message',
@@ -375,20 +400,43 @@ function gitCommitAndTag(string $semver, string $codename): void
         required: true,
     );
     $committed = false;
-    spin(function () use ($commitMsg, $semver, &$committed): void {
+    spin(function () use ($commitMsg, &$committed): void {
         $runner = gitRunner();
         $runner->add('.');
-        $signed = $runner->hasSigning();
-        $commit = $signed ? $runner->commitSigned($commitMsg) : $runner->commit($commitMsg);
-        if (!$commit->ok) { return; }
-        $committed = true;
-        $signed ? $runner->tagSigned($semver) : $runner->tag($semver);
-    }, "Committing bootstrap/ → {$semver}…");
+        $signed  = $runner->hasSigning();
+        $commit  = $signed ? $runner->commitSigned($commitMsg) : $runner->commit($commitMsg);
+        if ($commit->ok) { $committed = true; }
+    }, 'Committing bootstrap/…');
     if (!$committed) {
         warning('Git commit failed — nothing to commit or an error occurred.');
-        return;
+        return '';
     }
-    info("Committed and tagged {$semver}");
+    // Patch the commit hash into fast-boot.php and amend — no new commit, tag lands on this one
+    $short = gitCommitShort();
+    $full  = gitCommitFull();
+    spin(function () use ($short, $full): void {
+        stampCommitHash($short, $full);
+        $runner = gitRunner();
+        $runner->add(BOOT);
+        $signed = $runner->hasSigning();
+        $signed ? $runner->amendNoEditSigned() : $runner->amendNoEdit();
+    }, 'Patching commit hash into fast-boot.php…');
+    $commitHash = gitCommitShort();
+    info("Committed {$commitHash}");
+    if (confirm("Tag this commit as {$semver}?", default: true)) {
+        $tagged = false;
+        spin(function () use ($semver, &$tagged): void {
+            $runner = gitRunner();
+            $signed = $runner->hasSigning();
+            $result = $signed ? $runner->tagSigned($semver) : $runner->tag($semver);
+            $tagged = $result->ok;
+        }, "Tagging {$semver}…");
+        if ($tagged) {
+            info("Tagged {$semver}");
+        } else {
+            warning("Tagging failed — tag {$semver} manually.");
+        }
+    }
     if (!confirm('Push to origin (' . REQUIRED_REMOTE . ')?', default: true)) {
         note(implode("\n", [
             'Push manually when ready:',
@@ -396,7 +444,7 @@ function gitCommitAndTag(string $semver, string $codename): void
             '  git push origin HEAD',
             "  git push origin {$semver}",
         ]));
-        return;
+        return $commitHash;
     }
     spin(function () use ($semver): void {
         $runner = gitRunner();
@@ -404,6 +452,7 @@ function gitCommitAndTag(string $semver, string $codename): void
         $runner->push('origin', $semver);
     }, 'Pushing to origin…');
     info('Pushed.');
+    return $commitHash;
 }
 // ── Interactive release flow ──────────────────────────────────────────────────
 function runStamp(string $version, int $build): void
@@ -416,19 +465,42 @@ function runStamp(string $version, int $build): void
         exit(0);
     }
     if (!hasSigningConfig()) {
-        warning('No GPG/SSH signing key configured');
-        note(implode("\n", [
-            'Commits and tags will NOT be signed. To enable signing:',
-            '',
-            '  # For SSH signing (recommended):',
-            '  git config --global gpg.format ssh',
-            '  git config --global user.signingkey ~/.ssh/id_ed25519.pub',
-            '',
-            '  # For GPG signing:',
-            '  git config --global user.signingkey YOUR_KEY_ID',
-            '',
-            'See: https://docs.github.com/en/authentication/managing-commit-signature-verification',
-        ]));
+        $sshKeys = detectSshKeys();
+        if (!empty($sshKeys)) {
+            $keyPath = count($sshKeys) === 1
+                ? $sshKeys[0]
+                : select('Select SSH key for signing', $sshKeys, $sshKeys[0]);
+            warning('No signing key configured — found: ' . basename($keyPath));
+            if (confirm('Auto-configure SSH signing with ' . $keyPath . '?', default: true)) {
+                if (autoSetupSigning($keyPath)) {
+                    info('SSH signing configured — commits and tags will be signed');
+                } else {
+                    warning('Auto-configuration failed. Commits will NOT be signed.');
+                }
+            } else {
+                warning('Skipped. Commits will NOT be signed.');
+            }
+        } else {
+            warning('No SSH key found in ~/.ssh/');
+            if (confirm('Generate a new ed25519 SSH key and configure git signing?', default: true)) {
+                $keyPath = ($_SERVER['HOME'] ?? '') . '/.ssh/id_ed25519';
+                $generated = false;
+                spin(function () use ($keyPath, &$generated): void {
+                    $p = \Webkernel\Process::fromArray(['ssh-keygen', '-t', 'ed25519', '-N', '', '-f', $keyPath]);
+                    $p->run();
+                    $generated = $p->isSuccessful();
+                }, 'Generating ~/.ssh/id_ed25519…');
+                if ($generated && autoSetupSigning($keyPath . '.pub')) {
+                    info('Key generated and git signing configured.');
+                    note('Public key (add to GitHub/GitLab): ' . $keyPath . '.pub');
+                    note(trim(file_get_contents($keyPath . '.pub')));
+                } else {
+                    warning('Key generation failed. Commits will NOT be signed.');
+                }
+            } else {
+                warning('Skipped. Commits will NOT be signed.');
+            }
+        }
     } else {
         info('Signing enabled — commits and tags will be signed');
     }
@@ -448,17 +520,17 @@ function runStamp(string $version, int $build): void
     $requires = buildRequires();
     $compat   = buildCompatibleWith();
     stamp($version, $build, $codename, $channel);
-    outro("Released {$semver} · {$codename} · {$channel}");
     info('Build stamped into fast-boot.php');
+    $commitHash = gitCommitAndTag($semver, $codename);
+    outro("Released {$semver} · {$codename} · {$channel}");
     note(implode("\n", [
-        'commit           ' . gitCommitShort() . '  (' . gitBranch() . ')',
+        'commit           ' . ($commitHash ?: gitCommitShort()) . '  (' . gitBranch() . ')',
         'date             ' . date('Y-m-d'),
         'codename         ' . $codename,
         'channel          ' . $channel,
         'requires         php ' . $requires['php']  . ' · laravel ' . $requires['laravel']  . ' · filament ' . $requires['filament'],
         'compatible_with  php ' . $compat['php']    . ' · laravel ' . $compat['laravel']    . ' · filament ' . $compat['filament'],
     ]));
-    gitCommitAndTag($semver, $codename);
 }
 // ── Commands ──────────────────────────────────────────────────────────────────
 $command = $argv[1] ?? 'help';
