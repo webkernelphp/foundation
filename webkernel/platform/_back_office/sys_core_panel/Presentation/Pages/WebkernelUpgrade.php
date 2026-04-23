@@ -51,6 +51,7 @@ class WebkernelUpgrade extends Page implements UpgradeOperation
     public array $docLinks          = [];
 
     public string $videoId          = '';
+    public string $selectedVersion  = '';
 
     public function mount(): void
     {
@@ -58,7 +59,30 @@ class WebkernelUpgrade extends Page implements UpgradeOperation
         $this->laravelVersion  = app()->version();
         $this->filamentVersion = \Composer\InstalledVersions::getPrettyVersion('filament/filament');
 
+        // Load metadata from release-meta.php for current version before any fetch
+        $this->loadCurrentVersionMetadata();
+
         $this->loadFromLocalRegistry();
+    }
+
+    private function loadCurrentVersionMetadata(): void
+    {
+        try {
+            $metaPath = WEBKERNEL_PATH . '/release-meta.php';
+            if (is_file($metaPath)) {
+                $meta = include $metaPath;
+                if (is_array($meta)) {
+                    $this->features = $meta['features'] ?? [];
+                    $this->docLinks = $meta['doc_links'] ?? [];
+                    $videoUrl = $meta['video'] ?? '';
+                    if ($videoUrl && preg_match('/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?]+)/', $videoUrl, $m)) {
+                        $this->videoId = $m[1];
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // No local metadata file or parsing failed
+        }
     }
 
     public function getProgressPercentage(): int
@@ -79,6 +103,29 @@ class WebkernelUpgrade extends Page implements UpgradeOperation
     public function updateProgress(): void
     {
         // Progress updates automatically via getProgressPercentage()
+    }
+
+    public function selectReleaseVersion(string $version): void
+    {
+        $this->selectedVersion = $version;
+        $this->loadReleaseMetadata($version);
+    }
+
+    private function loadReleaseMetadata(string $version): void
+    {
+        try {
+            $release = WebkernelRelease::forTarget('webkernel', 'foundation')
+                ->where('version', $version)
+                ->first();
+
+            if ($release) {
+                $this->features = $release->metaFeatures();
+                $this->docLinks = $release->metaDocLinks();
+                $this->videoId  = $release->metaVideoId();
+            }
+        } catch (\Throwable) {
+            // Failed to load metadata
+        }
     }
 
     private function loadFromLocalRegistry(): void
@@ -102,6 +149,12 @@ class WebkernelUpgrade extends Page implements UpgradeOperation
                 $this->latestVersion = $latest->version;
                 $this->isUpToDate    = version_compare($this->currentVersion, $latest->version, '>=');
                 $this->lastChecked   = $latest->updated_at->toIso8601String();
+
+                // Set selected version to latest and load its metadata
+                if (!$this->selectedVersion) {
+                    $this->selectedVersion = $latest->version;
+                }
+                $this->loadReleaseMetadata($this->selectedVersion);
             }
 
             $this->releases = $sorted->take(20)->map(fn($r) => [
