@@ -21,6 +21,7 @@ require __DIR__ . '/../../vendor/autoload.php';
 require __DIR__ . '/fast-boot.php';
 const BOOT            = __DIR__ . '/fast-boot.php';
 const BUILD_FILE      = __DIR__ . '/support/.build-number';
+const RELEASE_META    = __DIR__ . '/release-meta.php';
 const COMPOSER_JSON   = __DIR__ . '/../composer.json';
 const COMPOSER_LOCK   = __DIR__ . '/../../composer.lock';
 const DEV_TOOLS       = __DIR__ . '/../../dev-tools.php';
@@ -365,7 +366,7 @@ function stamp(string $version, int $build, string $codename, string $channel): 
     }, 'Stamping fast-boot.php…');
 }
 // ── Git commit + push whole bootstrap/ ───────────────────────────────────────
-function gitCommitAndTag(string $semver, string $codename): string
+function gitCommitAndTag(string $semver, string $codename, string $channel): string
 {
     if (!confirm('Commit all changes in bootstrap/?', default: true)) {
         warning('Skipped git commit. Remember to commit manually.');
@@ -510,7 +511,7 @@ function runStamp(string $version, int $build): void
     $compat   = buildCompatibleWith();
     stamp($version, $build, $codename, $channel);
     info('Build stamped into fast-boot.php');
-    $commitHash = gitCommitAndTag($semver, $codename);
+    $commitHash = gitCommitAndTag($semver, $codename, $channel);
     outro("Released {$semver} · {$codename} · {$channel}");
     note(implode("\n", [
         'commit           ' . ($commitHash ?: gitCommitShort()) . '  (' . gitBranch() . ')',

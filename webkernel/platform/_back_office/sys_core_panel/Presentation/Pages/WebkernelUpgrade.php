@@ -49,6 +49,14 @@ class WebkernelUpgrade extends Page
 
     public string $latestVersion    = ''; // To retrieve from github
 
+    /** @var array<int, array{icon: string, title: string, body: string}> */
+    public array $features  = [];
+    /** @var array<int, array{icon: string, label: string, url: string}> */
+    public array $docLinks  = [];
+    public string $videoId  = '';
+    /** @var array<int, array{version: string, codename: string, date: string, notes: string, current: bool}> */
+    public array $releases  = [];
+
     public function mount(): void
     {
         $this->phpVersion      = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '.' . PHP_RELEASE_VERSION;
@@ -72,10 +80,35 @@ class WebkernelUpgrade extends Page
                 $this->latestVersion = $latest->tag_name;
                 $this->isUpToDate    = $checker->isUpToDate($this->currentVersion);
                 $this->lastChecked   = $lastLog?->checked_at->toIso8601String() ?? '';
-                return;
+
+                // Meta comes from the tag annotation, stored in DB
+                $this->features = $latest->metaFeatures();
+                $this->docLinks = $latest->metaDocLinks();
+                $this->videoId  = $latest->metaVideoId();
             }
+
+            // All stable releases for rollback modal
+            $rows = \Webkernel\BackOffice\System\Domain\Updates\Models\WebkernelRelease
+                ::forTarget(
+                    WebkernelUpdateChecker::WEBKERNEL_TARGET_TYPE,
+                    WebkernelUpdateChecker::WEBKERNEL_SLUG,
+                )
+                ->stable()
+                ->orderByDesc('published_at')
+                ->orderByDesc('created_at')
+                ->limit(20)
+                ->get();
+
+            $this->releases = $rows->map(fn ($r) => [
+                'version'  => $r->version,
+                'codename' => $r->codename ?? '',
+                'date'     => $r->published_at?->toDateString() ?? $r->created_at->toDateString(),
+                'notes'    => $r->meta_notes ?? $r->release_notes ?? '',
+                'current'  => version_compare($r->version, $this->currentVersion, '='),
+            ])->all();
+
         } catch (\Throwable) {
-            // DB not yet migrated — will show "never checked" state
+            // DB not yet migrated — fallbacks (empty arrays) already set as property defaults
         }
     }
 
