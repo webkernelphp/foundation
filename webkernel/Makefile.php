@@ -403,16 +403,30 @@ function gitCommitAndTag(string $semver, string $codename, string $channel): str
     info("Committed {$commitHash}");
     $tagged = false;
     if (confirm("Tag this commit as {$semver}?", default: true)) {
-        $notes   = text(label: 'Release notes (changelog)', placeholder: 'Bug fixes, improvements…', default: '');
-        $videoId = text(label: 'YouTube video ID (optional)', placeholder: 'dQw4w9WgXcQ', default: '');
-        $tagMeta = json_encode(array_filter([
-            'codename' => $codename,
-            'channel'  => $channel,
-            'notes'    => $notes ?: null,
-            'video'    => $videoId ?: null,
-        ]), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $tagMsg  = "{$semver}\n\n{$tagMeta}";
-        $tagResult = null;
+        $releaseMeta = [];
+        if (is_file(RELEASE_META)) {
+            $releaseMeta = include RELEASE_META;
+            if (!is_array($releaseMeta)) {
+                $releaseMeta = [];
+            }
+        }
+
+        $notes   = text(label: 'Release notes (changelog)', placeholder: $releaseMeta['notes'] ?? 'Bug fixes, improvements…', default: $releaseMeta['notes'] ?? '');
+        $videoId = text(label: 'YouTube video ID (optional)', placeholder: 'dQw4w9WgXcQ', default: $releaseMeta['video'] ?? '');
+
+        $tagMeta = array_filter([
+            'codename'  => $codename,
+            'channel'   => $channel,
+            'notes'     => $notes ?: null,
+            'video'     => $videoId ?: null,
+            'features'  => $releaseMeta['features'] ?? null,
+            'doc_links' => $releaseMeta['doc_links'] ?? null,
+        ], static fn ($v) => $v !== null);
+
+        $tagMetaJson = json_encode($tagMeta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $tagMsg      = "{$semver}\n\n{$tagMetaJson}";
+        $tagResult   = null;
+
         spin(function () use ($semver, $tagMsg, &$tagResult): void {
             $runner    = gitRunner();
             $signed    = $runner->hasSigning();
