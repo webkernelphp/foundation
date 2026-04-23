@@ -45,8 +45,13 @@ spl_autoload_register(static function (string $class): void {
                 'Webkernel\\Businesses\\'    => WEBKERNEL_PATH . '/aptitudes/instance/businesses',
                 'Webkernel\\Users\\'         => WEBKERNEL_PATH . '/aptitudes/instance/users',
 
-                /* Backend Layer: System Infrastructure */
-                'Webkernel\\System\\'        => WEBKERNEL_PATH . '/platform/_backend',
+                /* Backend Layer: System Infrastructure — subdivided by concern */
+                'Webkernel\\System\\Host\\'      => WEBKERNEL_PATH . '/platform/_backend/host',
+                'Webkernel\\System\\Console\\'   => WEBKERNEL_PATH . '/platform/_backend/host/Console',
+                'Webkernel\\System\\Security\\'  => WEBKERNEL_PATH . '/platform/security',
+                'Webkernel\\System\\Access\\'    => WEBKERNEL_PATH . '/platform/_backend/access',
+                'Webkernel\\System\\Ops\\'       => WEBKERNEL_PATH . '/platform/_backend/ops',
+                'Webkernel\\System\\'            => WEBKERNEL_PATH . '/platform/_backend', // Fallback: WebkernelAPI, WebAppInterface
 
                 /* Platform Layer */
                 'Webkernel\\Arcanes\\'       => WEBKERNEL_PATH . '/platform/arcanes',
@@ -54,9 +59,9 @@ spl_autoload_register(static function (string $class): void {
                 'Webkernel\\Routes\\'        => WEBKERNEL_PATH . '/platform/routing',
 
                 /* System Panel Specific Assets */
-                'Webkernel\\BackOffice\\System\\'       => WEBKERNEL_PATH . '/platform/_back_office/sys_core_panel',
-                'Webkernel\\BackOffice\\Businesses\\'   => WEBKERNEL_PATH . '/platform/_back_office/sys_biz_panel',
-                'Webkernel\\BackOffice\\Installer\\'    => WEBKERNEL_PATH . '/platform/_back_office/installer_panel',
+                'Webkernel\\BackOffice\\System\\'               => WEBKERNEL_PATH . '/platform/_back_office/sys_core_panel',
+                'Webkernel\\BackOffice\\Businesses\\'           => WEBKERNEL_PATH . '/platform/_back_office/sys_biz_panel',
+                'Webkernel\\BackOffice\\Installer\\'            => WEBKERNEL_PATH . '/platform/_back_office/installer_panel',
 
 
                 /* Support Layer */

@@ -4,28 +4,19 @@ namespace Webkernel\BackOffice\System\Providers;
 
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
-use Webkernel\System\Contracts\WebAppInterface;
-use Webkernel\System\Contracts\Managers\AppManagerInterface;
-use Webkernel\System\Contracts\Managers\AuthManagerInterface;
-use Webkernel\System\Contracts\Managers\ContextManagerInterface;
-use Webkernel\System\Contracts\Managers\HostManagerInterface;
-use Webkernel\System\Contracts\Managers\InstanceManagerInterface;
-use Webkernel\System\Contracts\Managers\OsManagerInterface;
-use Webkernel\System\Contracts\Managers\RuntimeManagerInterface;
-use Webkernel\System\Contracts\Managers\SecurityManagerInterface;
-use Webkernel\System\Contracts\Managers\UsersManagerInterface;
-use Webkernel\System\Contracts\Managers\VersionManagerInterface;
-use Webkernel\System\Managers\VersionManager;
-use Webkernel\System\WebernelAPI;
-use Webkernel\System\Managers\AppManager;
-use Webkernel\System\Managers\AuthManager;
-use Webkernel\System\Managers\ContextManager;
-use Webkernel\System\Managers\HostManager;
-use Webkernel\System\Managers\InstanceManager;
-use Webkernel\System\Managers\OsManager;
-use Webkernel\System\Managers\RuntimeManager;
-use Webkernel\System\Managers\SecurityManager;
-use Webkernel\System\Managers\UsersManager;
+use Webkernel\System\WebAppInterface;
+use Webkernel\System\Host\Contracts\Managers\{
+    HostManagerInterface, InstanceManagerInterface, OsManagerInterface,
+    VersionManagerInterface};
+use Webkernel\System\Access\Contracts\Managers\{
+    AppManagerInterface, AuthManagerInterface, ContextManagerInterface,
+    RuntimeManagerInterface, SecurityManagerInterface, UsersManagerInterface};
+use Webkernel\System\WebkernelAPI;
+use Webkernel\System\Host\Managers\{
+    VersionManager, HostManager, InstanceManager, OsManager};
+use Webkernel\System\Access\Managers\{
+    AppManager, AuthManager, ContextManager, RuntimeManager,
+    SecurityManager, UsersManager};
 /**
  * Binds all Webkernel manager interfaces to their concrete implementations.
  *
@@ -42,8 +33,8 @@ final class SystemManagerServiceProvider extends ServiceProvider
     public function register(): void
     {
         // Root API singleton
-        $this->app->singleton(WebAppInterface::class, WebernelAPI::class);
-        $this->app->singleton(WebernelAPI::class);
+        $this->app->singleton(WebAppInterface::class, WebkernelAPI::class);
+        $this->app->singleton(WebkernelAPI::class);
 
         // ── Stable singletons ─────────────────────────────────────────────────
         $this->app->singleton(InstanceManagerInterface::class, InstanceManager::class);
@@ -76,15 +67,7 @@ final class SystemManagerServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->mergeConfigFrom(
-            __DIR__ . '/../Config/system-manager.php',
-            'webkernel-system',
-        );
 
-        $this->mergeConfigFrom(
-            __DIR__ . '/../Config/webkernel-auth.php',
-            'webkernel-auth',
-        );
 
         // ── Auto-migrate on fresh install ─────────────────────────────────────
         // Idempotent: Schema::hasTable() is a near-instant no-op once done.
@@ -106,9 +89,9 @@ final class SystemManagerServiceProvider extends ServiceProvider
         // Registered unconditionally so Artisan::call() works from web requests
         // (e.g. the installer panel calling webkernel:install).
         $this->commands([
-            \Webkernel\System\Console\DetectCapabilities::class,
-            \Webkernel\System\Console\Install::class,
-            \Webkernel\System\Console\RefreshPhpReleasesCache::class,
+            \Webkernel\System\Host\Console\DetectCapabilities::class,
+            \Webkernel\System\Host\Console\Install::class,
+            \Webkernel\System\Host\Console\RefreshPhpReleasesCache::class,
         ]);
 
         // ── Octane worker lifecycle hooks ─────────────────────────────────────
@@ -118,9 +101,9 @@ final class SystemManagerServiceProvider extends ServiceProvider
             \Illuminate\Support\Facades\Event::listen(
                 \Laravel\Octane\Events\WorkerStarting::class,
                 static function (): void {
-                    \Webkernel\System\Support\CapabilityMap::reset();
-                    \Webkernel\System\Support\CapabilityMap::get();  // pre-warm
-                    \Webkernel\System\Support\StaticDataCache::reset();
+                    \Webkernel\System\Host\Support\CapabilityMap::reset();
+                    \Webkernel\System\Host\Support\CapabilityMap::get();  // pre-warm
+                    \Webkernel\System\Host\Support\StaticDataCache::reset();
                 }
             );
         }
