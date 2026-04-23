@@ -1221,6 +1221,7 @@
     x-data="{
         rollbackOpen: false,
         selectedRelease: null,
+        currentVersion: '{{ $currentVersion }}',
         videoPlaying: false,
         openRollback()  { this.rollbackOpen = true; },
         closeRollback() { this.rollbackOpen = false; this.selectedRelease = null; },
@@ -1678,8 +1679,7 @@
                 <x-filament::button color="gray" outlined x-on:click="closeRollback()">Cancel</x-filament::button>
                 <x-filament::button
                     color="primary"
-                    :disabled="!$release['current']" {{-- just a dummy; you'll need proper logic --}}
-                    x-bind:disabled="!selectedRelease"
+                    x-bind:disabled="!selectedRelease || selectedRelease === currentVersion"
                     wire:click="rollbackToVersion(selectedRelease)"
                 >
                     Rollback

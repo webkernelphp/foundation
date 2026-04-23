@@ -201,11 +201,13 @@ class WebkernelRelease extends Model
 
     private static function parseTag(string $tagName): array
     {
+        $tagName = ltrim($tagName, 'v');
+
         if (str_contains($tagName, '+')) {
             [$version, $build] = explode('+', $tagName, 2);
             return [$version, $build];
         }
 
-        return [ltrim($tagName, 'v'), null];
+        return [$tagName, null];
     }
 }
