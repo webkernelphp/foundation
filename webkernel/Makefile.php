@@ -423,33 +423,36 @@ function gitCommitAndTag(string $semver, string $codename): string
     }, 'Patching commit hash into fast-boot.php…');
     $commitHash = gitCommitShort();
     info("Committed {$commitHash}");
+    $tagged = false;
     if (confirm("Tag this commit as {$semver}?", default: true)) {
-        $tagged = false;
-        spin(function () use ($semver, &$tagged): void {
-            $runner = gitRunner();
-            $signed = $runner->hasSigning();
-            $result = $signed ? $runner->tagSigned($semver) : $runner->tag($semver);
-            $tagged = $result->ok;
+        $tagResult = null;
+        spin(function () use ($semver, &$tagResult): void {
+            $runner    = gitRunner();
+            $signed    = $runner->hasSigning();
+            $tagResult = $signed ? $runner->tagSigned($semver) : $runner->tag($semver);
         }, "Tagging {$semver}…");
-        if ($tagged) {
+        if ($tagResult?->ok) {
+            $tagged = true;
             info("Tagged {$semver}");
         } else {
-            warning("Tagging failed — tag {$semver} manually.");
+            $err = trim($tagResult?->stderr ?? '');
+            warning("Tagging failed: " . ($err ?: 'unknown git error'));
+            note("  cd bootstrap && git tag " . (hasSigningConfig() ? '-s ' : '') . $semver);
         }
     }
     if (!confirm('Push to origin (' . REQUIRED_REMOTE . ')?', default: true)) {
-        note(implode("\n", [
+        note(implode("\n", array_filter([
             'Push manually when ready:',
             '  cd bootstrap',
             '  git push origin HEAD',
-            "  git push origin {$semver}",
-        ]));
+            $tagged ? "  git push origin {$semver}" : null,
+        ])));
         return $commitHash;
     }
-    spin(function () use ($semver): void {
+    spin(function () use ($semver, $tagged): void {
         $runner = gitRunner();
         $runner->push('origin', 'HEAD');
-        $runner->push('origin', $semver);
+        if ($tagged) { $runner->push('origin', $semver); }
     }, 'Pushing to origin…');
     info('Pushed.');
     return $commitHash;
